@@ -1,30 +1,38 @@
+
 export function fuzzy (query: string, value: string): number {
   if (!query || !value || query.length < 3) return 0
+
+  // Los identificadores numéricos deben coincidir exactamente.
+  if (/\d/.test(query) || /\d/.test(value)) return 0
 
   const words = value.split(/\s+/)
   const queryWords = query.split(/\s+/).length
 
-  let bestScore = 0
+  let bestSimilarity = 0
 
-  for (let size = Math.max(1, queryWords - 1); size <= queryWords + 1; size++) {
+  for (
+    let size = Math.max(1, queryWords - 1);
+    size <= queryWords + 1;
+    size++
+  ) {
     for (let i = 0; i <= words.length - size; i++) {
       const candidate = words.slice(i, i + size).join(' ')
       const maxLength = Math.max(query.length, candidate.length)
 
-      if (Math.abs(query.length - candidate.length) > maxLength * 0.3) {
+      if (Math.abs(query.length - candidate.length) > maxLength * 0.25) {
         continue
       }
 
       const distance = editDistance(query, candidate)
       const similarity = 1 - distance / maxLength
 
-      bestScore = Math.max(bestScore, similarity)
+      bestSimilarity = Math.max(bestSimilarity, similarity)
     }
   }
 
-  if (bestScore < 0.7) return 0
+  if (bestSimilarity < 0.75) return 0
 
-  return Math.round(bestScore * 40)
+  return Math.round(bestSimilarity * 40)
 }
 
 function editDistance (a: string, b: string): number {
@@ -49,7 +57,6 @@ function editDistance (a: string, b: string): number {
         matrix[i - 1][j - 1] + cost
       )
 
-      // Letras adyacentes intercambiadas
       if (
         i > 1 &&
         j > 1 &&
