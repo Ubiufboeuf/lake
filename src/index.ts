@@ -24,6 +24,7 @@ export type ScoredItem = {
 }
 
 export type Duplicated = {
+  key?: (result: ScoredItem) => string | number
   join: (a: ScoredItem, b: ScoredItem) => boolean
   resolve: (a: ScoredItem, b: ScoredItem) => ScoredItem
 }
@@ -39,6 +40,33 @@ interface Props<T extends SearchItem> {
   duplicated?: Duplicated
   weights?: Weights<T>
   minScore?: number
+  timeout?: number
+}
+
+export type QueryOptions = {
+  onUpdate?: (results: ScoredItem[]) => void
+  onError?: (error: unknown, sourceIndex: number) => void
+}
+
+function withTimeout<T> (promise: Promise<T>, timeout: number): Promise<T> {
+  if (timeout <= 0) return promise
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Lake source timed out after ${timeout} ms`))
+    }, timeout)
+
+    promise.then(
+      value => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      error => {
+        clearTimeout(timer)
+        reject(error)
+      }
+    )
+  })
 }
 
 const DEFAULT_WEIGHTS = {
@@ -52,7 +80,8 @@ export function createLake<T extends SearchItem> ({
   fields,
   duplicated,
   weights = DEFAULT_WEIGHTS as Weights<T>,
-  minScore = 1
+  minScore = 1,
+  timeout = 2000
 }: Props<T>) {
   if (!sources.length && !indexed.length) return null
 
@@ -79,26 +108,45 @@ export function createLake<T extends SearchItem> ({
     : null
 
   return {
-    query: async (query: string) => {
-      if (!query.trim()) return []
+    query: async (query: string, { onUpdate, onError }: QueryOptions = {}) => {
+      if (!query.trim()) {
+        onUpdate?.([])
+        return []
+      }
 
-      const resultsList = await Promise.all(
-        sources.map(source => source(query))
-      )
+      // Consultamos el índice antes de esperar respuestas externas.
+      const resultsList: SearchResults[] = index?.search(query) ?? []
 
-      const indexedResults = index?.search(query) ?? []
+      const getResults = (): ScoredItem[] => {
+        const ranked = rank<T>(query, resultsList, weights)
+        const unique = deduplicate(ranked, duplicated)
 
-      const ranked = rank<T>(
-        query,
-        [...indexedResults, ...resultsList],
-        weights
-      )
+        return unique
+          .filter(result => result.score >= minScore)
+          .sort((a, b) => b.score - a.score)
+      }
 
-      const unique = deduplicate(ranked, duplicated)
+      // La primera actualización permite mostrar resultados indexados de inmediato.
+      onUpdate?.(getResults())
 
-      return unique
-        .filter(result => result.score >= minScore)
-        .sort((a, b) => b.score - a.score)
+      await Promise.all(sources.map(async (source, sourceIndex) => {
+        let response: SearchResults
+
+        try {
+          response = await withTimeout(
+            Promise.resolve().then(() => source(query)),
+            timeout
+          )
+        } catch (error) {
+          onError?.(error, sourceIndex)
+          return
+        }
+
+        resultsList.push(response)
+        onUpdate?.(getResults())
+      }))
+
+      return getResults()
     },
 
     reindex: (data: SearchResults[]) => {
