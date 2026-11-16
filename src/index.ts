@@ -44,6 +44,8 @@ interface Props<T extends SearchItem> {
 }
 
 export type QueryOptions = {
+  /** Cantidad máxima de resultados devueltos (entero >= 0). */
+  limit?: number
   onUpdate?: (results: ScoredItem[]) => void
   onError?: (error: unknown, sourceIndex: number) => void
 }
@@ -108,7 +110,10 @@ export function createLake<T extends SearchItem> ({
     : null
 
   return {
-    query: async (query: string, { onUpdate, onError }: QueryOptions = {}) => {
+    query: async (query: string, { onUpdate, onError, limit }: QueryOptions = {}) => {
+      if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 0)) {
+        throw new RangeError('limit debe ser un entero no negativo')
+      }
       if (!query.trim()) {
         onUpdate?.([])
         return []
@@ -118,12 +123,15 @@ export function createLake<T extends SearchItem> ({
       const resultsList: SearchResults[] = index?.search(query) ?? []
 
       const getResults = (): ScoredItem[] => {
-        const ranked = rank<T>(query, resultsList, weights)
+        // Con deduplicación, resolve() puede modificar puntuaciones y resultados.
+        // Por eso debemos deduplicar el conjunto completo antes de aplicar limit.
+        const ranked = rank<T>(query, resultsList, weights, duplicated ? undefined : limit)
         const unique = deduplicate(ranked, duplicated)
+        const valid = unique.filter(result => result.score >= minScore)
 
-        return unique
-          .filter(result => result.score >= minScore)
-          .sort((a, b) => b.score - a.score)
+        // rank() ya ordena los resultados sin deduplicación.
+        if (duplicated) valid.sort((a, b) => b.score - a.score)
+        return limit === undefined ? valid : valid.slice(0, limit)
       }
 
       // La primera actualización permite mostrar resultados indexados de inmediato.
