@@ -1,4 +1,4 @@
-import type { Source } from '../src/.index'
+import type { Source } from '../src'
 import { localMocks, remoteMocks } from './mocks'
 
 export const local: Source = () => ({
