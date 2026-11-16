@@ -1,10 +1,24 @@
-
 {
   "name": "@mangufaf/lake",
-  "version": "0.1.0",
-  "description": "Lightweight, configurable search and ranking engine for TypeScript",
+  "version": "1.0.0",
+  "description": "A lightweight, configurable search and ranking engine for TypeScript.",
+  "keywords": [
+    "lake",
+    "search",
+    "search-engine",
+    "fuzzy-search",
+    "ranking",
+    "full-text-search",
+    "typescript",
+    "indexing",
+    "deduplication",
+    "zero-dependency"
+  ],
+  "license": "MIT",
+  "author": "mAngo",
   "type": "module",
   "main": "./dist/index.js",
+  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
@@ -12,13 +26,14 @@
       "import": "./dist/index.js"
     }
   },
+  "sideEffects": false,
   "files": [
     "dist"
   ],
   "scripts": {
     "build": "bun build.ts && dts-bundle-generator --no-check -o dist/index.d.ts src/index.ts",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "bun run build"
+    "prepublishOnly": "bun run typecheck && bun run build"
   },
   "publishConfig": {
     "access": "public"
