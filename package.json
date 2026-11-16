@@ -1,6 +1,6 @@
 {
   "name": "@mangufaf/lake",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A lightweight, configurable search and ranking engine for TypeScript.",
   "keywords": [
     "lake",
