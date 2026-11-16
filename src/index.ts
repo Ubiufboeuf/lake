@@ -33,7 +33,7 @@ export type Weights<T extends SearchItem = SearchItem> =
   | Partial<Record<keyof T, number>>
   | ((item: T, origin: string) => Partial<Record<keyof T, number>>)
 
-interface Props<T extends SearchItem> {
+export interface LakeProps<T extends SearchItem> {
   sources?: Source[]
   indexed?: SearchResults[]
   fields?: (keyof T)[]
@@ -84,7 +84,7 @@ export function createLake<T extends SearchItem> ({
   weights = DEFAULT_WEIGHTS as Weights<T>,
   minScore = 1,
   timeout = 2000
-}: Props<T>) {
+}: LakeProps<T>) {
   if (!sources.length && !indexed.length) return null
 
   const getFields = (data: SearchResults[]): (keyof T)[] => {
