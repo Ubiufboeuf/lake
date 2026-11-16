@@ -4,7 +4,7 @@ import { deduplicate } from './deduplicate'
 import { rank } from './rank'
 import { buildIndex } from './search-index'
 
-export type Source = (query: string) => SearchResults | Promise<SearchResults>
+export type Source = (query: string, signal?: AbortSignal) => SearchResults | Promise<SearchResults>
 
 export type SearchItem = {
   id: string
@@ -46,25 +46,53 @@ export interface LakeProps<T extends SearchItem> {
 export type QueryOptions = {
   /** Cantidad máxima de resultados devueltos (entero >= 0). */
   limit?: number
+  /** Cancela la búsqueda actual y se transmite a las fuentes. */
+  signal?: AbortSignal
   onUpdate?: (results: ScoredItem[]) => void
   onError?: (error: unknown, sourceIndex: number) => void
 }
 
-function withTimeout<T> (promise: Promise<T>, timeout: number): Promise<T> {
-  if (timeout <= 0) return promise
+function withTimeout<T> (
+  promise: Promise<T>,
+  timeout: number,
+  signal?: AbortSignal
+): Promise<T> {
+  if (timeout <= 0 && !signal) return promise
 
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error(`Lake source timed out after ${timeout} ms`))
-    }, timeout)
+    if (signal?.aborted) {
+      reject(signal.reason)
+      return
+    }
+
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    const cleanup = () => {
+      if (timer !== undefined) clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+    }
+
+    const onAbort = () => {
+      cleanup()
+      reject(signal?.reason)
+    }
+
+    signal?.addEventListener('abort', onAbort, { once: true })
+
+    if (timeout > 0) {
+      timer = setTimeout(() => {
+        cleanup()
+        reject(new Error(`Lake source timed out after ${timeout} ms`))
+      }, timeout)
+    }
 
     promise.then(
       value => {
-        clearTimeout(timer)
+        cleanup()
         resolve(value)
       },
       error => {
-        clearTimeout(timer)
+        cleanup()
         reject(error)
       }
     )
@@ -110,12 +138,14 @@ export function createLake<T extends SearchItem> ({
     : null
 
   return {
-    query: async (query: string, { onUpdate, onError, limit }: QueryOptions = {}) => {
+    query: async (query: string, { onUpdate, onError, limit, signal }: QueryOptions = {}) => {
+      signal?.throwIfAborted()
       if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 0)) {
         throw new RangeError('limit debe ser un entero no negativo')
       }
       if (!query.trim()) {
         onUpdate?.([])
+        signal?.throwIfAborted()
         return []
       }
 
@@ -134,26 +164,42 @@ export function createLake<T extends SearchItem> ({
         return limit === undefined ? valid : valid.slice(0, limit)
       }
 
+      const notify = () => {
+        signal?.throwIfAborted()
+        const results = getResults()
+        signal?.throwIfAborted()
+        onUpdate?.(results)
+      }
+
       // La primera actualización permite mostrar resultados indexados de inmediato.
-      onUpdate?.(getResults())
+      notify()
+      signal?.throwIfAborted()
 
       await Promise.all(sources.map(async (source, sourceIndex) => {
         let response: SearchResults
 
         try {
+          signal?.throwIfAborted()
           response = await withTimeout(
-            Promise.resolve().then(() => source(query)),
-            timeout
+            Promise.resolve().then(() => {
+              signal?.throwIfAborted()
+              return source(query, signal)
+            }),
+            timeout,
+            signal
           )
         } catch (error) {
+          if (signal?.aborted) return
           onError?.(error, sourceIndex)
           return
         }
 
+        if (signal?.aborted) return
         resultsList.push(response)
-        onUpdate?.(getResults())
+        notify()
       }))
 
+      signal?.throwIfAborted()
       return getResults()
     },
 
